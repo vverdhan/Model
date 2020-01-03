@@ -1,0 +1,373 @@
+---
+title: "HR Attrition models"
+output: html_document
+---
+
+
+```{r}
+install.packages('knitr')
+library(knitr)
+```
+
+
+## Let us first set the working directory path - please put in the relevant path below
+```{r}
+setwd ('/Users/vaibhavverdhan/Documents/Self 2/Start/Training/Great Learning/ModelPerformance/')
+getwd()
+```
+
+
+## Import the data from the above path
+```{r}
+HRData <- read.csv("HR_Employee_Attrition_Dataset.csv", sep = ",", header = T)
+```
+
+
+##Check the dimention or shape of the data
+```{r}
+dim(HRData)
+```
+
+
+##View top 5 rows
+```{r}
+HRData[1:5,]
+```
+
+
+##Lets see the variable list in the data
+```{r}
+names(HRData)
+```
+
+
+##Lets see the datatype of the data set
+```{r}
+str(HRData)
+```
+
+
+##Converting target variable from Yes/No to 1/0 and convert it into factor
+```{r}
+table(HRData$Attrition)
+HRData$Attrite = ifelse(HRData$Attrition=="Yes",1,0)
+table(HRData$Attrite)
+HRData$Attrite = as.factor(HRData$Attrite)
+HRData=HRData[-c(2)]
+```
+
+
+
+## Employeecount, Over18 and StandardHours are variables where all the values are same.
+##So we are not going to use these 3 variables.
+
+##Summary Satatistics Measure of central tendency and dispersion (Univariate Analysis)
+##(count,missing value,mean,0.01,0.05,0.10,0.25,Median,0.75,0.90,0.95,0.99,min,max,range,skew,kurtosis,SD,IQR) for continous variable
+```{r}
+library(psych)
+data_description<-describe(HRData,na.rm = TRUE,quant = c(0.01,0.05,0.10,0.25,0.75,0.90,0.95,0.99),IQR=TRUE,check=TRUE)
+```
+
+
+
+
+
+##We dont have any missing value in the data set and we have used the above distribution to find out outliers
+
+## But for a practice, we are mentioning below code for outlier treatment
+##Applying flooring and capping on all continous variables. Here we are using 1 and 99 percentile for outlier treatment.
+##Even you can take 5 and 95 percentile also for performing the outlier treatment
+
+##HRData[,3] = ifelse(HRData[,3]<=quantile(HRData[,3],0.01),quantile(HRData[,3],0.01),HRData[,3])
+##HRData[,3] = ifelse(HRData[,3]>=quantile(HRData[,3],0.99),quantile(HRData[,3],0.99),HRData[,3])
+
+## removing unwanted variables
+```{r}
+HRData = HRData[,-c(1,10,22,27)]
+```
+
+
+##Buildig Random Forest model
+
+## Spliting the dataset into train and test for development and out of sample testing respectively
+```{r}
+set.seed(100)
+HR_N_TRAIN_INDEX <- sample(1:nrow(HRData),0.70*nrow(HRData))
+RFtrain <- HRData[HR_N_TRAIN_INDEX,]
+RFtest <- HRData[-HR_N_TRAIN_INDEX,]
+
+```
+
+##import randomForest library for building random forest model
+```{r}
+library(randomForest)
+
+```
+
+## set a seed to start the randomness
+```{r}
+seed = 1000
+set.seed(seed)
+
+```
+
+
+##Build the first RF model
+```{r}
+Rforest = randomForest(Attrite~.,data=RFtrain,ntree=501,mtry=10,nodesize=10,importance=TRUE)
+
+```
+
+##Print the model to see the OOB and error rate
+```{r}
+print(Rforest)
+
+```
+
+##Plot the RF to know the optimum number of trees
+```{r}
+plot(Rforest)
+
+```
+
+##Identify the importance of the variables
+```{r}
+randomForest::importance(Rforest)
+
+```
+
+##Tune up the RF model to find out the best mtry
+
+
+head(RFtrain)
+
+```{r}
+
+set.seed(seed)
+tRforest = tuneRF(x=RFtrain[,-c(31)],y=RFtrain$Attrite,mtrystart = 10,stepfactor=1.5,ntree=71,improve=0.0001,
+                  nodesize=10,trace=TRUE,plot=TRUE,doBest=TRUE,importance=TRUE)
+
+```
+
+##Build the refined RF model
+```{r}
+Rforest = randomForest(Attrite~.,data=RFtrain,ntree=71,mtry=10,nodesize=10,importance=TRUE)
+print(Rforest)
+
+```
+
+
+##install.packages('caret')
+##install.packages('e1071')
+##Use this tree to do the prediction on train as well as test data set
+```{r}
+RFtrain$RF.Pred = predict(Rforest,data=RFtrain,type="class")
+RFtrain$RF.Score = predict(Rforest,data=RFtrain,type="prob")[,"1"]
+RFtest$RF.Pred = predict(Rforest,RFtest,type="class")
+RFtest$RF.Score = predict(Rforest,RFtest,type="prob")[,"1"]
+
+tbl=table(RFtest$Attrite, RFtest$RF.Pred)
+library(caret)
+confusionMatrix(RFtest$Attrite, RFtest$RF.Pred)
+
+```
+
+
+##Additional code that can be useful sometimes. It is a bit complex and you can ignore it for now if you want to
+##The following function helps us to change the order of the variables in the data frame.
+```{r}
+ shuffle_columns <- function (invec, movecommand) {
+      movecommand <- lapply(strsplit(strsplit(movecommand, ";")[[1]],
+                                 ",|\\s+"), function(x) x[x != ""])
+  movelist <- lapply(movecommand, function(x) {
+    Where <- x[which(x %in% c("before", "after", "first",
+                              "last")):length(x)]
+    ToMove <- setdiff(x, Where)
+    list(ToMove, Where)
+  })
+  myVec <- invec
+  for (i in seq_along(movelist)) {
+    temp <- setdiff(myVec, movelist[[i]][[1]])
+    A <- movelist[[i]][[2]][1]
+    if (A %in% c("before", "after")) {
+      ba <- movelist[[i]][[2]][2]
+      if (A == "before") {
+        after <- match(ba, temp) - 1
+      }
+      else if (A == "after") {
+        after <- match(ba, temp)
+      }
+    }
+    else if (A == "first") {
+      after <- 0
+    }
+    else if (A == "last") {
+      after <- length(myVec)
+    }
+    myVec <- append(temp, values = movelist[[i]][[1]], after = after)
+  }
+  myVec
+ }
+```
+
+##We are changing the order of the variable Attrite so that it is in the same place as where the variable Attrition was before
+```{r}
+HRData <- HRData[shuffle_columns(names(HRData), "Attrite before BusinessTravel")]
+```
+
+
+
+##Building CHAID model
+
+## Spliting the dataset into train and test for development and out of sample testing respectively
+```{r}
+set.seed(100)
+HR_N_TRAIN_INDEX <- sample(1:nrow(HRData),0.70*nrow(HRData))
+CHAIDtrain <- HRData[HR_N_TRAIN_INDEX,]
+CHAIDtest <- HRData[-HR_N_TRAIN_INDEX,]
+
+```
+
+
+```{r}
+library(party)
+
+chaid.ctrl<- ctree_control(mincriterion = 0.95, minsplit = 100, minbucket = 100)
+fit <- ctree(Attrite~BusinessTravel+Department+EducationField+
+                    Gender+JobRole+MaritalStatus, 
+             data=CHAIDtrain, control=chaid.ctrl)
+```
+
+##Use this tree to do the prediction on train as well as test data set
+```{r}
+CHAIDtrain$CHAID.Pred = predict(fit,data=CHAIDtrain,type="response")
+CHAIDtrain$CHAID.Score = predict(fit,data=CHAIDtrain,type="prob")
+
+```
+
+##Performance Measure Parameters - to be covered in week 4
+
+##Confusion Matrix
+
+
+## RF Model Confusion Metrix
+```{r}
+RF_CM_train = table(RFtrain$Attrite,RFtrain$RF.Pred)
+RF_CM_test = table(RFtest$Attrite,RFtest$RF.Pred)
+
+```
+
+
+## Error Rate
+```{r}
+(RF_CM_train[1,2]+RF_CM_train[2,1])/nrow(RFtrain)
+(RF_CM_test[1,2]+RF_CM_test[2,1])/nrow(RFtest)
+
+```
+
+
+##Accuracy
+```{r}
+(RF_CM_train[1,1]+RF_CM_train[2,2])/nrow(RFtrain)
+(RF_CM_test[1,1]+RF_CM_test[2,2])/nrow(RFtest)
+
+```
+
+
+
+
+
+
+##Similarly from the confusion matrix you can calculate sensitivity and specificity
+
+##Probablity related parameters like KS,ROC,AUC,Concordance,discordance and gini
+
+```{r}
+library(ROCR)
+library(ineq)
+library(InformationValue)
+
+```
+
+
+
+## RF Model
+```{r}
+predobjtrain = prediction(RFtrain$RF.Score,RFtrain$Attrite)
+preftrain = performance(predobjtrain,"tpr","fpr")
+plot(preftrain)
+
+```
+
+```{r}
+
+predobjtest = prediction(RFtest$RF.Score,RFtest$Attrite)
+preftest = performance(predobjtest,"tpr","fpr")
+plot(preftest)
+```
+
+
+
+##KS
+```{r}
+max(preftrain@y.values[[1]]-preftrain@x.values[[1]])
+max(preftest@y.values[[1]]-preftest@x.values[[1]])
+
+```
+
+
+
+##AUC
+```{r}
+auctrain=performance(predobjtrain,"auc")
+as.numeric(auctrain@y.values)
+auctest=performance(predobjtest,"auc")
+as.numeric(auctest@y.values)
+
+```
+
+
+
+##gini
+```{r}
+ineq(RFtrain$RF.Score,"gini")
+ineq(RFtest$RF.Score,"gini")
+
+```
+
+
+
+##Concordance
+```{r}
+Concordance(actuals=RFtrain$Attrite,predictedScores = RFtrain$RF.Score)
+Concordance(actuals=RFtest$Attrite,predictedScores = RFtest$RF.Score)
+
+```
+
+
+
+
+## Create a CART Model now
+```{r}
+library(rpart)
+library(rpart.plot)
+tree <- rpart(Attrite ~ ., data = RFtrain, control = rpart.control(cp = 0.0001))
+printcp(tree)
+
+bestcp <- tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"]
+tree.pruned <- prune(tree, cp = bestcp)
+
+conf.matrix <- table(RFtrain$Attrite, predict(tree.pruned,type="class"))
+rownames(conf.matrix) <- paste("Actual", rownames(conf.matrix), sep = ":")
+colnames(conf.matrix) <- paste("Pred", colnames(conf.matrix), sep = ":")
+print(conf.matrix)
+
+prp(tree.pruned, faclen = 0, cex = 0.8, extra = 1, yflip = FALSE)
+
+```
+
+```{r}
+text(tree.pruned, cex = 0.8, use.n = TRUE, xpd = TRUE)
+
+```
+
